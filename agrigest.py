@@ -412,7 +412,7 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__=="__main__":
     init_db()
-    PORT=5000
+    PORT=int(os.environ.get("PORT", 5000))
     import socket, qrcode
 
     # Trouver l'adresse IP locale automatiquement
