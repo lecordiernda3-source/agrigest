@@ -182,7 +182,7 @@ tr:hover td{background:#f9fbe7}
 .chart-box{background:#fff;border-radius:8px;padding:16px;box-shadow:0 1px 4px #0001}
 .chart-box h3{font-size:13px;font-weight:600;color:#2E7D32;margin-bottom:12px;text-align:center}
 </style>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js</script>
 </head>
 <body>
 <header>
