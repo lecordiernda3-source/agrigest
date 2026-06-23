@@ -3,12 +3,17 @@ AgriGest - Application de gestion des dépenses agricoles par client
 Lancement : python agrigest2.py  puis ouvrir http://localhost:5000
 """
 
-import sqlite3, os, json
+import sqlite3, os, json, hashlib, secrets
 from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 import webbrowser, threading
+
+# ─── AUTHENTIFICATION ───
+USERNAME = "lecordiernda"
+PASSWORD_HASH = hashlib.sha256("lecordier@93".encode()).hexdigest()
+SESSIONS = {}  # token -> True
 
 DB_FILE = "agrigest.db"
 
@@ -178,7 +183,8 @@ tr:hover td{background:#f9fbe7}
 <body>
 <header>
   <div style="font-size:26px">&#127807;</div>
-  <div><h1>AgriGest</h1><p>Gestion des depenses agricoles par client</p></div>
+  <div style="flex:1"><h1>AgriGest</h1><p>Gestion des depenses agricoles par client</p></div>
+  <a href="/api/logout" style="background:#1B5E20;color:#fff;padding:7px 14px;border-radius:6px;font-size:13px;text-decoration:none">Deconnexion</a>
 </header>
 <div class="main" id="root">Chargement...</div>
 <div id="msg"></div>
@@ -353,6 +359,77 @@ go('home');
 </body>
 </html>"""
 
+LOGIN_HTML = """<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgriGest - Connexion</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Segoe UI,sans-serif;background:#f0f4f0;display:flex;align-items:center;justify-content:center;min-height:100vh}
+.box{background:#fff;border-radius:12px;padding:36px 32px;width:100%;max-width:360px;box-shadow:0 4px 20px #0001}
+.logo{text-align:center;margin-bottom:24px}
+.logo div{font-size:48px}
+.logo h1{font-size:22px;font-weight:700;color:#2E7D32;margin-top:8px}
+.logo p{font-size:13px;color:#888;margin-top:4px}
+label{font-size:13px;font-weight:500;color:#444;display:block;margin-bottom:5px}
+input{width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:7px;font-size:14px;margin-bottom:16px}
+input:focus{outline:none;border-color:#2E7D32;box-shadow:0 0 0 2px #2E7D3222}
+.btn{width:100%;padding:11px;background:#2E7D32;color:#fff;border:none;border-radius:7px;font-size:15px;font-weight:600;cursor:pointer}
+.btn:hover{background:#1B5E20}
+.err{background:#FFEBEE;color:#C62828;padding:10px 12px;border-radius:7px;font-size:13px;margin-bottom:14px;display:none}
+</style>
+</head>
+<body>
+<div class="box">
+  <div class="logo">
+    <div>&#127807;</div>
+    <h1>AgriGest</h1>
+    <p>Gestion des depenses agricoles</p>
+  </div>
+  <div class="err" id="err">Identifiants incorrects. Reessayez.</div>
+  <label>Nom d'utilisateur</label>
+  <input type="text" id="usr" placeholder="Entrez votre nom d'utilisateur">
+  <label>Mot de passe</label>
+  <input type="password" id="pwd" placeholder="Entrez votre mot de passe">
+  <button class="btn" onclick="login()">Se connecter</button>
+</div>
+<script>
+function login(){
+  var usr=document.getElementById('usr').value.trim();
+  var pwd=document.getElementById('pwd').value;
+  var x=new XMLHttpRequest();
+  x.open('POST','/api/login');
+  x.setRequestHeader('Content-Type','application/json');
+  x.onload=function(){
+    var d=JSON.parse(x.responseText);
+    if(d.ok){
+      document.cookie='token='+d.token+';path=/';
+      location.reload();
+    } else {
+      document.getElementById('err').style.display='block';
+    }
+  };
+  x.send(JSON.stringify({username:usr,password:pwd}));
+}
+document.addEventListener('keydown',function(e){if(e.key==='Enter') login();});
+</script>
+</body>
+</html>"""
+
+def get_token(headers):
+    cookie = headers.get("Cookie","")
+    for part in cookie.split(";"):
+        part = part.strip()
+        if part.startswith("token="):
+            return part[6:]
+    return None
+
+def is_authenticated(headers):
+    token = get_token(headers)
+    return token and token in SESSIONS
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, format, *args): pass
 
@@ -366,12 +443,29 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         from urllib.parse import urlparse
         path = urlparse(self.path).path
+
+        # Vérifier authentification sauf pour /api/login
+        if not is_authenticated(self.headers):
+            body = LOGIN_HTML.encode()
+            self.send_response(200)
+            self.send_header("Content-Type","text/html; charset=utf-8")
+            self.send_header("Content-Length",len(body))
+            self.end_headers(); self.wfile.write(body)
+            return
+
         if path in ("/","/index.html"):
             body = HTML.encode()
             self.send_response(200)
             self.send_header("Content-Type","text/html; charset=utf-8")
             self.send_header("Content-Length",len(body))
             self.end_headers(); self.wfile.write(body)
+        elif path=="/api/logout":
+            token = get_token(self.headers)
+            if token in SESSIONS: del SESSIONS[token]
+            self.send_response(302)
+            self.send_header("Location","/")
+            self.send_header("Set-Cookie","token=;path=/;Max-Age=0")
+            self.end_headers()
         elif path=="/api/clients":
             self.send_json(get_clients())
         elif path.startswith("/api/transactions/"):
@@ -394,6 +488,24 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         length = int(self.headers.get("Content-Length",0))
         body = json.loads(self.rfile.read(length))
+
+        # Route login sans authentification
+        if self.path=="/api/login":
+            usr = body.get("username","")
+            pwd_hash = hashlib.sha256(body.get("password","").encode()).hexdigest()
+            if usr==USERNAME and pwd_hash==PASSWORD_HASH:
+                token = secrets.token_hex(32)
+                SESSIONS[token] = True
+                self.send_json({"ok":True,"token":token})
+            else:
+                self.send_json({"ok":False})
+            return
+
+        # Vérifier authentification pour toutes les autres routes
+        if not is_authenticated(self.headers):
+            self.send_json({"error":"non autorise"},401)
+            return
+
         if self.path=="/api/clients":
             add_client(body["nom"],body.get("telephone",""),body.get("culture",""))
             self.send_json({"ok":True})
@@ -404,6 +516,9 @@ class Handler(BaseHTTPRequestHandler):
         else: self.send_json({"error":"not found"},404)
 
     def do_DELETE(self):
+        if not is_authenticated(self.headers):
+            self.send_json({"error":"non autorise"},401)
+            return
         if self.path.startswith("/api/clients/"):
             delete_client(int(self.path.split("/")[-1])); self.send_json({"ok":True})
         elif self.path.startswith("/api/transactions/"):
@@ -412,33 +527,14 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__=="__main__":
     init_db()
-    PORT=int(os.environ.get("PORT", 5000))
-    import socket, qrcode
-
-    # Trouver l'adresse IP locale automatiquement
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    s.connect(("8.8.8.8", 80))
-    IP = s.getsockname()[0]
-    s.close()
-
-    URL = f"http://{IP}:{PORT}"
-
-    # Générer et afficher le QR code dans le terminal
-    qr = qrcode.QRCode(border=2)
-    qr.add_data(URL)
-    qr.make(fit=True)
-    qr.print_ascii(invert=True)
-
-    print(f"""
+    PORT=5000
+    server=HTTPServer(("localhost",PORT),Handler)
+    print("""
 +------------------------------------------+
 |        AgriGest demarre !                |
-|  PC      : http://localhost:{PORT}          |
-|  Telephone : {URL}  |
-|  Scanne le QR code avec ton telephone    |
+|  Ouvre : http://localhost:5000           |
 |  Ctrl+C pour arreter                     |
 +------------------------------------------+""")
-
-    server=HTTPServer(("0.0.0.0",PORT),Handler)
-    threading.Timer(1.5,lambda: webbrowser.open("http://localhost:"+str(PORT))).start()
+    threading.Timer(1.5,lambda: webbrowser.open("http://localhost:5000")).start()
     try: server.serve_forever()
     except KeyboardInterrupt: print("\nAgriGest arrete.")
