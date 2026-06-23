@@ -527,8 +527,8 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__=="__main__":
     init_db()
-    PORT=5000
-    server=HTTPServer(("localhost",PORT),Handler)
+    PORT=int(os.environ.get("PORT",5000))
+    server=HTTPServer(("0.0.0.0",PORT),Handler)
     print("""
 +------------------------------------------+
 |        AgriGest demarre !                |
