@@ -182,7 +182,6 @@ tr:hover td{background:#f9fbe7}
 .chart-box{background:#fff;border-radius:8px;padding:16px;box-shadow:0 1px 4px #0001}
 .chart-box h3{font-size:13px;font-weight:600;color:#2E7D32;margin-bottom:12px;text-align:center}
 </style>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js</script>
 </head>
 <body>
 <header>
@@ -222,12 +221,8 @@ function go(v,id){
 
 function draw(){
   var r=document.getElementById('root');
-  if(view==='home'){
-    r.innerHTML=homeHTML();
-    setTimeout(drawCharts,50);
-  } else {
-    r.innerHTML=detailHTML();
-  }
+  if(view==='home') r.innerHTML=homeHTML();
+  else r.innerHTML=detailHTML();
 }
 
 function homeHTML(){
@@ -239,11 +234,11 @@ function homeHTML(){
   h+='<div class="stat s3"><div class="l">Total rembourse</div><div class="v">'+fmt(tr2)+'</div></div>';
   h+='<div class="stat s4"><div class="l">Credit total restant</div><div class="v">'+fmt(tc)+'</div></div>';
   h+='</div>';
-  // Graphiques seulement si au moins 1 client
+  // Graphiques SVG
   if(clients.length>0){
     h+='<div class="charts">';
-    h+='<div class="chart-box"><h3>Depenses vs Remboursements par client</h3><canvas id="chartBar"></canvas></div>';
-    h+='<div class="chart-box"><h3>Repartition Credit restant</h3><canvas id="chartPie"></canvas></div>';
+    h+='<div class="chart-box"><h3>Depenses vs Remboursements par client</h3>'+svgBar()+'</div>';
+    h+='<div class="chart-box"><h3>Credit restant par client</h3>'+svgCredit()+'</div>';
     h+='</div>';
   }
   h+='<div class="card"><h2>Ajouter un client</h2>';
@@ -278,47 +273,82 @@ function homeHTML(){
   return h;
 }
 
-function drawCharts(){
-  if(clients.length===0) return;
-  var noms=clients.map(function(c){return c.nom;});
-  var deps=clients.map(function(c){return c.total_depenses;});
-  var rembs=clients.map(function(c){return c.total_remboursements;});
-  var credits=clients.map(function(c){return Math.max(c.credit_restant,0);});
-  var colors=['#2E7D32','#1565C0','#E65100','#6A1B9A','#00838F','#C62828','#558B2F','#4527A0'];
-
-  // Graphique barres
-  var cb=document.getElementById('chartBar');
-  if(cb){
-    new Chart(cb,{
-      type:'bar',
-      data:{
-        labels:noms,
-        datasets:[
-          {label:'Depenses',data:deps,backgroundColor:'#C6282888',borderColor:'#C62828',borderWidth:1},
-          {label:'Rembourse',data:rembs,backgroundColor:'#2E7D3288',borderColor:'#2E7D32',borderWidth:1}
-        ]
-      },
-      options:{responsive:true,plugins:{legend:{position:'bottom'}},scales:{y:{beginAtZero:true}}}
-    });
+function svgBar(){
+  var W=420,H=200,pad=40,barW=18,gap=14;
+  var maxVal=1;
+  for(var i=0;i<clients.length;i++){
+    if(clients[i].total_depenses>maxVal) maxVal=clients[i].total_depenses;
+    if(clients[i].total_remboursements>maxVal) maxVal=clients[i].total_remboursements;
   }
-
-  // Graphique camembert credit restant
-  var cp=document.getElementById('chartPie');
-  if(cp){
-    var hasCredit=credits.some(function(v){return v>0;});
-    if(hasCredit){
-      new Chart(cp,{
-        type:'doughnut',
-        data:{
-          labels:noms,
-          datasets:[{data:credits,backgroundColor:colors.slice(0,noms.length),borderWidth:2}]
-        },
-        options:{responsive:true,plugins:{legend:{position:'bottom'}}}
-      });
-    } else {
-      cp.parentElement.innerHTML='<h3>Repartition Credit restant</h3><div style="text-align:center;color:#aaa;padding:40px;font-size:13px">Aucun credit restant</div>';
-    }
+  var chartH=H-pad*2;
+  var s='<svg width="100%" viewBox="0 0 '+W+' '+H+'" xmlns="http://www.w3.org/2000/svg">';
+  // Lignes de grille
+  for(var g=0;g<=4;g++){
+    var y=pad+chartH*(1-g/4);
+    s+='<line x1="'+pad+'" y1="'+y+'" x2="'+(W-10)+'" y2="'+y+'" stroke="#eee" stroke-width="1"/>';
+    var lbl=Math.round(maxVal*g/4/1000)+'k';
+    s+='<text x="'+(pad-4)+'" y="'+(y+4)+'" text-anchor="end" font-size="9" fill="#999">'+lbl+'</text>';
   }
+  // Barres
+  var groupW=(barW*2+gap+10);
+  var startX=pad+10;
+  for(var i=0;i<clients.length;i++){
+    var x=startX+i*groupW;
+    var hDep=chartH*(clients[i].total_depenses/maxVal);
+    var hRemb=chartH*(clients[i].total_remboursements/maxVal);
+    s+='<rect x="'+x+'" y="'+(pad+chartH-hDep)+'" width="'+barW+'" height="'+hDep+'" fill="#C6282899" rx="2"/>';
+    s+='<rect x="'+(x+barW+3)+'" y="'+(pad+chartH-hRemb)+'" width="'+barW+'" height="'+hRemb+'" fill="#2E7D3299" rx="2"/>';
+    var nom=clients[i].nom.length>8?clients[i].nom.substring(0,7)+'...':clients[i].nom;
+    s+='<text x="'+(x+barW)+'" y="'+(H-8)+'" text-anchor="middle" font-size="9" fill="#555">'+nom+'</text>';
+  }
+  // Legende
+  s+='<rect x="'+pad+'" y="4" width="10" height="10" fill="#C62828" rx="2"/>';
+  s+='<text x="'+(pad+13)+'" y="13" font-size="10" fill="#555">Depenses</text>';
+  s+='<rect x="'+(pad+80)+'" y="4" width="10" height="10" fill="#2E7D32" rx="2"/>';
+  s+='<text x="'+(pad+93)+'" y="13" font-size="10" fill="#555">Rembourse</text>';
+  s+='</svg>';
+  return s;
+}
+
+function svgCredit(){
+  var W=300,H=200;
+  var credits=[];
+  var total=0;
+  var colors=['#2E7D32','#1565C0','#E65100','#6A1B9A','#00838F','#C62828','#558B2F','#F57F17'];
+  for(var i=0;i<clients.length;i++){
+    var v=Math.max(clients[i].credit_restant,0);
+    credits.push(v); total+=v;
+  }
+  if(total===0) return '<div style="text-align:center;color:#aaa;padding:40px;font-size:13px">Aucun credit restant</div>';
+  var cx=110,cy=90,r=70;
+  var s='<svg width="100%" viewBox="0 0 '+W+' '+H+'" xmlns="http://www.w3.org/2000/svg">';
+  var angle=-Math.PI/2;
+  for(var i=0;i<clients.length;i++){
+    if(credits[i]===0) continue;
+    var slice=2*Math.PI*(credits[i]/total);
+    var x1=cx+r*Math.cos(angle);
+    var y1=cy+r*Math.sin(angle);
+    var x2=cx+r*Math.cos(angle+slice);
+    var y2=cy+r*Math.sin(angle+slice);
+    var large=slice>Math.PI?1:0;
+    s+='<path d="M'+cx+','+cy+' L'+x1+','+y1+' A'+r+','+r+' 0 '+large+',1 '+x2+','+y2+' Z" fill="'+colors[i%colors.length]+'" stroke="#fff" stroke-width="2"/>';
+    angle+=slice;
+  }
+  // Cercle central blanc
+  s+='<circle cx="'+cx+'" cy="'+cy+'" r="30" fill="#fff"/>';
+  s+='<text x="'+cx+'" y="'+(cy+4)+'" text-anchor="middle" font-size="10" fill="#444" font-weight="bold">Credit</text>';
+  // Legende
+  var ly=20;
+  for(var i=0;i<clients.length&&i<6;i++){
+    if(credits[i]===0) continue;
+    s+='<rect x="190" y="'+(ly-9)+'" width="10" height="10" fill="'+colors[i%colors.length]+'" rx="2"/>';
+    var nom=clients[i].nom.length>10?clients[i].nom.substring(0,9)+'...':clients[i].nom;
+    var pct=Math.round(credits[i]/total*100);
+    s+='<text x="203" y="'+ly+'" font-size="10" fill="#444">'+nom+' ('+pct+'%)</text>';
+    ly+=18;
+  }
+  s+='</svg>';
+  return s;
 }
 
 function detailHTML(){
