@@ -178,7 +178,11 @@ tr:hover td{background:#f9fbe7}
 #msg{position:fixed;bottom:20px;right:20px;padding:10px 18px;border-radius:8px;font-size:13px;display:none;color:#fff;z-index:99}
 .mok{background:#2E7D32}.merr{background:#C62828}
 @media(max-width:600px){.stats{grid-template-columns:repeat(2,1fr)}.row{flex-direction:column}}
+.charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;margin-bottom:16px}
+.chart-box{background:#fff;border-radius:8px;padding:16px;box-shadow:0 1px 4px #0001}
+.chart-box h3{font-size:13px;font-weight:600;color:#2E7D32;margin-bottom:12px;text-align:center}
 </style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
 <header>
@@ -218,8 +222,12 @@ function go(v,id){
 
 function draw(){
   var r=document.getElementById('root');
-  if(view==='home') r.innerHTML=homeHTML();
-  else r.innerHTML=detailHTML();
+  if(view==='home'){
+    r.innerHTML=homeHTML();
+    setTimeout(drawCharts,50);
+  } else {
+    r.innerHTML=detailHTML();
+  }
 }
 
 function homeHTML(){
@@ -231,6 +239,13 @@ function homeHTML(){
   h+='<div class="stat s3"><div class="l">Total rembourse</div><div class="v">'+fmt(tr2)+'</div></div>';
   h+='<div class="stat s4"><div class="l">Credit total restant</div><div class="v">'+fmt(tc)+'</div></div>';
   h+='</div>';
+  // Graphiques seulement si au moins 1 client
+  if(clients.length>0){
+    h+='<div class="charts">';
+    h+='<div class="chart-box"><h3>Depenses vs Remboursements par client</h3><canvas id="chartBar"></canvas></div>';
+    h+='<div class="chart-box"><h3>Repartition Credit restant</h3><canvas id="chartPie"></canvas></div>';
+    h+='</div>';
+  }
   h+='<div class="card"><h2>Ajouter un client</h2>';
   h+='<div class="row">';
   h+='<input id="nom" placeholder="Nom du client *">';
@@ -261,6 +276,49 @@ function homeHTML(){
   }
   h+='</div>';
   return h;
+}
+
+function drawCharts(){
+  if(clients.length===0) return;
+  var noms=clients.map(function(c){return c.nom;});
+  var deps=clients.map(function(c){return c.total_depenses;});
+  var rembs=clients.map(function(c){return c.total_remboursements;});
+  var credits=clients.map(function(c){return Math.max(c.credit_restant,0);});
+  var colors=['#2E7D32','#1565C0','#E65100','#6A1B9A','#00838F','#C62828','#558B2F','#4527A0'];
+
+  // Graphique barres
+  var cb=document.getElementById('chartBar');
+  if(cb){
+    new Chart(cb,{
+      type:'bar',
+      data:{
+        labels:noms,
+        datasets:[
+          {label:'Depenses',data:deps,backgroundColor:'#C6282888',borderColor:'#C62828',borderWidth:1},
+          {label:'Rembourse',data:rembs,backgroundColor:'#2E7D3288',borderColor:'#2E7D32',borderWidth:1}
+        ]
+      },
+      options:{responsive:true,plugins:{legend:{position:'bottom'}},scales:{y:{beginAtZero:true}}}
+    });
+  }
+
+  // Graphique camembert credit restant
+  var cp=document.getElementById('chartPie');
+  if(cp){
+    var hasCredit=credits.some(function(v){return v>0;});
+    if(hasCredit){
+      new Chart(cp,{
+        type:'doughnut',
+        data:{
+          labels:noms,
+          datasets:[{data:credits,backgroundColor:colors.slice(0,noms.length),borderWidth:2}]
+        },
+        options:{responsive:true,plugins:{legend:{position:'bottom'}}}
+      });
+    } else {
+      cp.parentElement.innerHTML='<h3>Repartition Credit restant</h3><div style="text-align:center;color:#aaa;padding:40px;font-size:13px">Aucun credit restant</div>';
+    }
+  }
 }
 
 function detailHTML(){
@@ -527,8 +585,8 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__=="__main__":
     init_db()
-    PORT=int(os.environ.get("PORT",5000))
-    server=HTTPServer(("0.0.0.0",PORT),Handler)
+    PORT=5000
+    server=HTTPServer(("localhost",PORT),Handler)
     print("""
 +------------------------------------------+
 |        AgriGest demarre !                |
